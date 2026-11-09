@@ -2,30 +2,32 @@ from flask import Flask, request, jsonify
 import requests
 import hmac
 import hashlib
+import base64
 import os
 
 app = Flask(__name__)
 
 # ========== 設定値（環境変数で設定） ==========
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
-AI_API_KEY = os.environ.get("AI_API_KEY")
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
+AI_API_KEY = os.environ.get("AI_API_KEY", "")
 AI_MODEL = "gemini-2.0-flash"
 
 # ========== LINE webhook ==========
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # 1. 署名検証
-    signature = request.headers.get("X-Line-Signature")
+    # 1. 署名検証（LINEの仕様に合わせBase64で検証）
+    signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
 
-    hash = hmac.new(
+    hash_bytes = hmac.new(
         LINE_CHANNEL_SECRET.encode("utf-8"),
         body.encode("utf-8"),
         hashlib.sha256,
-    ).hexdigest()
+    ).digest()
+    expected_signature = base64.b64encode(hash_bytes).decode("utf-8")
 
-    if not hmac.compare_digest(hash, signature):
+    if not hmac.compare_digest(expected_signature, signature):
         return jsonify({"status": "error", "message": "Signature mismatch"}), 401
 
     # 2. メッセージを解析
@@ -48,11 +50,10 @@ def webhook():
 
 def get_ai_response(message):
     """AIにメッセージを送って回答をもらう"""
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{AI_MODEL}:generateContent?key={AI_API_KEY}"
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {AI_API_KEY}",
     }
 
     payload = {
@@ -98,6 +99,5 @@ def health():
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
